@@ -1,0 +1,236 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/12/Screen.jack
+
+/**
+ * A library of functions for displaying graphics on the screen.
+ * The Hack physical screen consists of 256 rows (indexed 0..255, top to bottom)
+ * of 512 pixels each (indexed 0..511, left to right). The top left pixel on 
+ * the screen is indexed (0,0).
+ */
+class Screen {
+
+    static boolean drawMode;
+    static Array powerOfTwo;
+    static Array xDivisionTable;
+    static Array yMultiplyTable;
+    static Array displayMem;
+
+    /** Initializes the Screen. */
+    function void init() {
+        var int counter;
+        
+        let displayMem = 16384; // manually set address of screen array so we can manage the memory 
+        let drawMode = true;   // initial color is black
+        
+        let powerOfTwo = Array.new(16);
+        let powerOfTwo[0] = 1;
+        let counter = 1;
+        while (counter < 16) {
+            let powerOfTwo[counter] = powerOfTwo[counter-1] + powerOfTwo[counter-1];
+            let counter = counter + 1;
+        }
+
+        // precompute x/16 so that drawing pixels is faster
+        let xDivisionTable = Array.new(512);
+        let counter = 0;
+        while (counter < 512) {
+            let xDivisionTable[counter] = counter / 16;
+            let counter = counter + 1;
+        }
+
+        // precompute y*32 so that drawing pixels is faster
+        let yMultiplyTable = Array.new(256);
+        let counter = 0;
+        while (counter < 256) {
+            let yMultiplyTable[counter] = counter * 32;
+            let counter = counter + 1;
+        }
+
+        return;
+    }
+
+    /** Erases the entire screen. */
+    function void clearScreen() {
+        var int memIndex;
+        let memIndex = 0;
+        while (memIndex < 8192) {
+            let displayMem[memIndex] = 0;
+            let memIndex = memIndex + 1;
+        }
+        return;
+    }
+
+    /** Sets the current color, to be used for all subsequent drawXXX commands.
+     *  Black is represented by true, white by false. */
+    function void setColor(boolean colorVal) {
+        let drawMode = colorVal;
+        return;
+    }
+
+
+    /** Draws the (x,y) pixel, using the current color. */
+    function void drawPixel(int xPos, int yPos) {
+        var int memLoc, currentVal, bitOffset, bitMask;
+
+        let memLoc = yMultiplyTable[yPos] + xDivisionTable[xPos]; // y*32 + x/16
+        let currentVal = displayMem[memLoc];
+        let bitOffset = xPos & 15;
+        let bitMask = powerOfTwo[bitOffset];
+        if (drawMode) {
+            let currentVal = currentVal | bitMask;
+        } else {
+            let currentVal = currentVal & ~bitMask;
+        }
+        let displayMem[memLoc] = currentVal;
+        return;
+    }
+
+    /** Draws a line from pixel (x1,y1) to pixel (x2,y2), using the current color. */
+    function void drawLine(int startX, int startY, int endX, int endY) {
+        var int deltaX, deltaY, stepX, stepY, errorVal, errorStep;
+
+        // vertical line
+        if (startX = endX) {
+            let deltaY = endY - startY;
+            if (deltaY > 0) {
+                let deltaY = 1;
+            } else {
+                let deltaY = -1;
+            }
+            while (~(endY = startY)) {
+                do Screen.drawPixel(startX, startY);
+                let startY = startY + deltaY;  
+            }
+            do Screen.drawPixel(startX, startY);
+            return;
+        }
+
+        // horizontal line
+        if (startY = endY) {
+            let deltaX = endX - startX;
+            if (deltaX > 0) {
+                let deltaX = 1;
+            } else {
+                let deltaX = -1;
+            }
+            while (~(endX = startX)) {
+                do Screen.drawPixel(startX, startY);
+                let startX = startX + deltaX;  
+            }
+            do Screen.drawPixel(startX, startY);
+            return;
+        }
+
+
+        // general line (Bresenham's algorithm)
+        if (startX < endX) {
+            let stepX = 1;
+            let deltaX = endX - startX;
+        } else {
+            let stepX = -1;
+            let deltaX = startX - endX;
+        }
+        if (startY < endY) {
+            let stepY = 1;
+            let deltaY = startY - endY;
+        } else {
+            let stepY = -1;
+            let deltaY = endY - startY;
+        }
+        let errorVal = deltaX + deltaY;
+
+        while (true) {
+            do Screen.drawPixel(startX, startY);
+            if ((startX = endX) & (startY = endY)) {
+                return;
+            }
+            let errorStep = 2*errorVal;
+            if ((errorStep > deltaY) | (errorStep = deltaY)) {
+                if (startX = endX) {
+                    return;
+                }
+                let errorVal = errorVal + deltaY;
+                let startX = startX + stepX;
+            }
+            if ((errorStep < deltaX) | (errorStep = deltaX)) {
+                if (startY = endY) {
+                    return;
+                }
+                let errorVal = errorVal + deltaX;
+                let startY = startY + stepY;
+            }
+        }
+        return;
+    }
+
+    /** Draws a filled rectangle whose top left corner is (x1, y1)
+     * and bottom right corner is (x2,y2), using the current color. */
+    function void drawRectangle(int leftX, int topY, int rightX, int bottomY) {
+        while (~(bottomY = topY)) {
+            do Screen.drawLine(leftX, topY, rightX, topY);
+            let topY = topY + 1;
+        }
+        return;
+    }
+
+    /** Draws a filled circle of radius r<=181 around (x,y), using the current color. */
+    function void drawCircle(int centerX, int centerY, int radius) {
+        // Midpoint circle algorithm
+        var int plotX, plotY, decision, diffVal;
+        let plotX = 0;
+        let plotY = radius;
+        let decision = 3 - (radius+radius);
+        do Screen.drawLine(centerX, centerY-plotY, centerX, centerY+plotY);
+        do Screen.drawLine(centerX-plotY, centerY, centerX+plotY, centerY);
+        while ((plotY > plotX) | (plotY = plotX)) {
+            let plotX = plotX + 1;
+            if (decision > 0) {
+                let plotY = plotY - 1;
+                let diffVal = plotX - plotY;
+                let decision = decision + diffVal + diffVal + diffVal + diffVal + 10;
+            } else {
+                let decision = decision + plotX + plotX + plotX + plotX + 6;
+            }
+            do Screen.drawLine(centerX-plotX, centerY+plotY, centerX+plotX, centerY+plotY);
+            do Screen.drawLine(centerX-plotX, centerY-plotY, centerX+plotX, centerY-plotY);
+            do Screen.drawLine(centerX-plotY, centerY+plotX, centerX+plotY, centerY+plotX);
+            do Screen.drawLine(centerX-plotY, centerY-plotX, centerX+plotY, centerY-plotX);
+        }
+        return;
+    }
+
+    function void outlineCircle(int centerX, int centerY, int radius) {
+        // Midpoint circle algorithm
+        var int plotX, plotY, decision, diffVal;
+        let plotX = 0;
+        let plotY = radius;
+        let decision = 3 - (radius+radius);
+
+        do Screen.drawPixel(centerX, centerY+plotY);
+        do Screen.drawPixel(centerX, centerY-plotY);
+        do Screen.drawPixel(centerX+plotY, centerY);
+        do Screen.drawPixel(centerX-plotY, centerY);
+        
+        while ((plotY > plotX) | (plotY = plotX)) {
+            let plotX = plotX + 1;
+            if (decision > 0) {
+                let plotY = plotY - 1;
+                let diffVal = plotX - plotY;
+                let decision = decision + diffVal + diffVal + diffVal + diffVal + 10;
+            } else {
+                let decision = decision + plotX + plotX + plotX + plotX + 6;
+            }
+            do Screen.drawPixel(centerX+plotX, centerY+plotY);
+            do Screen.drawPixel(centerX-plotX, centerY+plotY);
+            do Screen.drawPixel(centerX+plotX, centerY-plotY);
+            do Screen.drawPixel(centerX-plotX, centerY-plotY);
+            do Screen.drawPixel(centerX+plotY, centerY+plotX);
+            do Screen.drawPixel(centerX-plotY, centerY+plotX);
+            do Screen.drawPixel(centerX+plotY, centerY-plotX);
+            do Screen.drawPixel(centerX-plotY, centerY-plotX);
+        }
+        return;
+    }
+}
